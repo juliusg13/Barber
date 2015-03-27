@@ -75,23 +75,27 @@ void ringbuf_deinit(ringbuf *sp)
 	free(sp->buf);
 }
 
-void ringbuf_insert(ringbuf *sp, struct customer item)
+void ringbuf_insert(ringbuf *sp, int item)
 {
 	sem_wait(&sp->slots);
         sem_wait(&sp->mutex);
+
 	sp->buf[(++sp->rear)%(sp->n)] = item;
         sem_post(&sp->mutex);
         sem_post(&sp->slots);
 }
 
-void ringbuf_remove(ringbuf *sp)
+int ringbuf_remove(ringbuf *sp)
 {
-	customer item;
+	int item;
         sem_wait(&sp->items);
         sem_wait(&sp->mutex);
+
 	item = sp->buf[(++sp->front)%(sp->n)];
+
         sem_post(&sp->mutex);
         sem_post(&sp->slots);
+
 	return item;
 }
 
@@ -103,11 +107,20 @@ static void *barber_work(void *arg)
 
     /* Main barber loop */
     while (true) {
+	sem_wait(&chairs->barber);
+        sem_wait(&chairs->mutex);
+
 	/* TODO: Here you must add you semaphores and locking logic */
 	customer = chairs->customer[0]; /* TODO: You must choose the customer */
 	thrlab_prepare_customer(customer, barber->room);
+
+	sem_post(&chairs->mutex);
+	sem_post(&chairs->chair);
+
         thrlab_sleep(5 * (customer->hair_length - customer->hair_goal));
         thrlab_dismiss_customer(customer, barber->room);
+
+	sem_post(&customer->mutex);
     }
     return NULL;
 }
@@ -123,7 +136,12 @@ static void setup(struct simulator *simulator)
     
     /* Create chairs*/
     chairs->customer = malloc(sizeof(struct customer *) * thrlab_get_num_chairs());
-    
+
+    sem_init(&chairs->mutex, 0, 1);
+    sem_init(&chairs->chair, 0, 1);
+    sem_init(&chairs->barber, 0, 0);
+
+
     /* Create barber thread data */
     simulator->barberThread = malloc(sizeof(pthread_t) * thrlab_get_num_barbers());
     simulator->barber = malloc(sizeof(struct barber*) * thrlab_get_num_barbers());
@@ -137,6 +155,8 @@ static void setup(struct simulator *simulator)
 	simulator->barber[i] = barber;
 	pthread_create(&simulator->barberThread[i], 0, barber_work, barber);
 	pthread_detach(simulator->barberThread[i]);
+
+//	sem_post(&customer->mutex);
     }
 }
 
@@ -164,8 +184,20 @@ static void customer_arrived(struct customer *customer, void *arg)
     sem_init(&customer->mutex, 0, 0);
 
     /* TODO: Accept if there is an available chair */
+
+    //if found
+
+    sem_wait(&chairs->mutex);
+    sem_wait(&chairs->chair);
+
     thrlab_accept_customer(customer);
     chairs->customer[0] = customer;
+
+    sem_post(&chairs->mutex);
+    sem_post(&chairs->barber);
+    sem_wait(&customer->mutex);
+
+
 
     /* TODO: Reject if there are no available chairs */
     thrlab_reject_customer(customer);
