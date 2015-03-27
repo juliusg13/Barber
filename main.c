@@ -35,6 +35,12 @@ struct chairs
     int max;
     /* TODO: Add more variables related to threads */
     /* Hint: Think of the consumer producer thread problem */
+    int front;
+    int rear;
+    int freeChairs;
+    sem_t mutexRing;
+    sem_t slotsRing;
+    sem_t itemsRing;
 
     sem_t mutex;
     sem_t chair;
@@ -55,7 +61,7 @@ struct simulator
     struct barber **barber;
 };
 
-void ringbuf_init(ringbuf *sp)
+/*void ringbuf_init(ringbuf *sp)
 {
 	int max_chairs = thrlab_get_num_chairs();
 	void* dest = sp->buf;
@@ -75,16 +81,16 @@ void ringbuf_deinit(ringbuf *sp)
 	free(sp->buf);
 }
 
-void ringbuf_insert(ringbuf *sp, int item)
+void ringbuf_insert(ringbuf *sp, void *item)
 {
 	sem_wait(&sp->slots);
         sem_wait(&sp->mutex);
 
-	sp->buf[(++sp->rear)%(sp->n)] = item;
+	sp->buf[(++sp->rear)%(sp->n)] = (void *)item;
         sem_post(&sp->mutex);
         sem_post(&sp->slots);
 }
-
+*/
 int ringbuf_remove(ringbuf *sp)
 {
 	int item;
@@ -141,6 +147,13 @@ static void setup(struct simulator *simulator)
     sem_init(&chairs->chair, 0, 1);
     sem_init(&chairs->barber, 0, 0);
 
+    sem_init(&chairs->mutexRing, 0, 1);
+    sem_init(&chairs->slotsRing, 0, thrlab_get_num_chairs());
+    sem_init(&chairs->itemsRing, 0, 0);
+
+    chairs->front = chairs->rear = 0;
+    chairs->freeChairs = chairs->max;
+
 
     /* Create barber thread data */
     simulator->barberThread = malloc(sizeof(pthread_t) * thrlab_get_num_barbers());
@@ -186,21 +199,34 @@ static void customer_arrived(struct customer *customer, void *arg)
     /* TODO: Accept if there is an available chair */
 
     //if found
+    if(chairs->freeChairs > 0) {
+	sem_wait(&chairs->slotsRing);
+        sem_wait(&chairs->mutexRing);
 
-    sem_wait(&chairs->mutex);
-    sem_wait(&chairs->chair);
+        chairs->customer[(++chairs->rear)%(chairs->max)] = customer;
 
-    thrlab_accept_customer(customer);
-    chairs->customer[0] = customer;
-
-    sem_post(&chairs->mutex);
-    sem_post(&chairs->barber);
-    sem_wait(&customer->mutex);
+        sem_post(&chairs->mutexRing);
+        sem_post(&chairs->slotsRing);
 
 
 
+
+    
+	sem_wait(&chairs->mutex);
+	sem_wait(&chairs->chair);
+
+	thrlab_accept_customer(customer);
+	chairs->customer[0] = customer;
+
+	sem_post(&chairs->mutex);
+	sem_post(&chairs->barber);
+	sem_wait(&customer->mutex);
+
+
+    } else {
     /* TODO: Reject if there are no available chairs */
-    thrlab_reject_customer(customer);
+	thrlab_reject_customer(customer);
+   }
 }
 
 int main (int argc, char **argv)
