@@ -12,8 +12,8 @@
  * provide your team information in below.
  *
  * === User information ===
- * User 1: 
- * SSN:
+ * User 1: Juliusg13
+ * SSN: 2801922799
  * User 2:
  * SSN:
  * === End User Information ===
