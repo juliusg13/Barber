@@ -37,7 +37,7 @@ struct chairs
     /* Hint: Think of the consumer producer thread problem */
     int front;
     int rear;
-    int freeChairs;
+//    int freeChairs;
     int queueSize;
     sem_t mutexRing;
     sem_t slotsRing;
@@ -61,6 +61,8 @@ struct simulator
     pthread_t *barberThread;
     struct barber **barber;
 };
+
+static int freeChairs;
 
 /*void ringbuf_init(ringbuf *sp)
 {
@@ -127,14 +129,23 @@ static void *barber_work(void *arg)
 
         sem_post(&chairs->mutexRing);
         sem_post(&chairs->slotsRing);
+
+
+
+
+//        sem_wait(&chairs->barber);
+//        sem_wait(&chairs->mutex);
+
 //------------------------------------------------
-	chairs->freeChairs++;
+//	chairs->freeChairs++;
+	freeChairs++;
 	chairs->queueSize--;
 //	customer = chairs->customer[0]; /* TODO: You must choose the customer */
-	thrlab_prepare_customer(customer, barber->room);
-
-	sem_post(&chairs->mutex);
 	sem_post(&chairs->chair);
+	thrlab_prepare_customer(customer, barber->room);
+//	sem_post(&chairs->chair);
+	sem_post(&chairs->mutex);
+//	sem_post(&chairs->chair);
 
         thrlab_sleep(5 * (customer->hair_length - customer->hair_goal));
         thrlab_dismiss_customer(customer, barber->room);
@@ -165,7 +176,8 @@ static void setup(struct simulator *simulator)
     sem_init(&chairs->itemsRing, 0, 0);
 
     chairs->front = chairs->rear = 0;
-    chairs->freeChairs = chairs->max;
+//    chairs->freeChairs = chairs->max;
+    freeChairs = thrlab_get_num_chairs();
     chairs->queueSize = 0;
 
 
@@ -213,30 +225,36 @@ static void customer_arrived(struct customer *customer, void *arg)
     /* TODO: Accept if there is an available chair */
 
     //if found
-    if(chairs->freeChairs > 0) {
+//    if(chairs->freeChairs > 0) {
+    if(freeChairs > 0) {
+	freeChairs--;
+	sem_wait(&chairs->chair);
+
 	sem_wait(&chairs->slotsRing);
         sem_wait(&chairs->mutexRing);
 
         chairs->customer[(++chairs->rear)%(chairs->max)] = customer;
+	thrlab_accept_customer(customer);
 
         sem_post(&chairs->mutexRing);
         sem_post(&chairs->itemsRing);
 
 	chairs->queueSize++;
-        chairs->freeChairs--;
+//        chairs->freeChairs = (chairs->freeChairs - 1);
 
-    
-	sem_wait(&chairs->mutex);
-	sem_wait(&chairs->chair);
 
-	thrlab_accept_customer(customer);
-	chairs->customer[0] = customer;
 
-	sem_post(&chairs->mutex);
+//	sem_wait(&chairs->mutex);
+//	sem_wait(&chairs->chair);
+
+//	thrlab_accept_customer(customer);
+//	chairs->customer[0] = customer;
+
+//	sem_post(&chairs->mutex);
+
+
 	sem_post(&chairs->barber);
 	sem_wait(&customer->mutex);
-
-
     } else {
     /* TODO: Reject if there are no available chairs */
 	thrlab_reject_customer(customer);
