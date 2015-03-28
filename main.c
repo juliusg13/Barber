@@ -38,6 +38,7 @@ struct chairs
     int front;
     int rear;
     int freeChairs;
+    int queueSize;
     sem_t mutexRing;
     sem_t slotsRing;
     sem_t itemsRing;
@@ -110,7 +111,7 @@ static void *barber_work(void *arg)
 {
     struct barber *barber = arg;
     struct chairs *chairs = &barber->simulator->chairs;
-    struct customer *customer = 0; /* TODO: Fetch a customer from a chair */
+    struct customer *customer = chairs->customer[0]; /* TODO: Fetch a customer from a chair */
 
     /* Main barber loop */
     while (true) {
@@ -119,16 +120,16 @@ static void *barber_work(void *arg)
 
 	/* TODO: Here you must add you semaphores and locking logic */
 
-//        sem_wait(&chairs->itemsRing);
-//        sem_wait(&chairs->mutexRing);
+        sem_wait(&chairs->itemsRing);
+        sem_wait(&chairs->mutexRing);
 
         customer = chairs->customer[(++chairs->front)%(chairs->max)];
 
-//        sem_post(&chairs->mutexRing);
-//        sem_post(&chairs->slotsRing);
+        sem_post(&chairs->mutexRing);
+        sem_post(&chairs->slotsRing);
 //------------------------------------------------
-
-
+	chairs->freeChairs++;
+	chairs->queueSize--;
 //	customer = chairs->customer[0]; /* TODO: You must choose the customer */
 	thrlab_prepare_customer(customer, barber->room);
 
@@ -165,6 +166,7 @@ static void setup(struct simulator *simulator)
 
     chairs->front = chairs->rear = 0;
     chairs->freeChairs = chairs->max;
+    chairs->queueSize = 0;
 
 
     /* Create barber thread data */
@@ -218,10 +220,10 @@ static void customer_arrived(struct customer *customer, void *arg)
         chairs->customer[(++chairs->rear)%(chairs->max)] = customer;
 
         sem_post(&chairs->mutexRing);
-        sem_post(&chairs->slotsRing);
+        sem_post(&chairs->itemsRing);
 
-
-
+	chairs->queueSize++;
+        chairs->freeChairs--;
 
     
 	sem_wait(&chairs->mutex);
