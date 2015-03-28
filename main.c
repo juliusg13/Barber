@@ -19,16 +19,9 @@
  * === End User Information ===
  ********************************************************/
 
-typedef struct {
-	int* buf;
-	int n;
-	int front;
-	int rear;
-	sem_t mutex;
-	sem_t slots;
-	sem_t items;
-} ringbuf;
 
+/* I have all the ringbuffer logic inside of chairs, front of the buffer, rear, queuesize to help me finding the right place and then the semaphores for locking,
+ slots are empty chairs & items are customers */
 struct chairs
 {
     struct customer **customer; /* Array of customers */
@@ -37,15 +30,11 @@ struct chairs
     /* Hint: Think of the consumer producer thread problem */
     int front;
     int rear;
-//    int freeChairs;
     int queueSize;
     sem_t mutexRing;
     sem_t slotsRing;
     sem_t itemsRing;
 
-    sem_t mutex;
-    sem_t chair;
-    sem_t barber;
 };
 
 struct barber
@@ -62,95 +51,38 @@ struct simulator
     struct barber **barber;
 };
 
-static int freeChairs;
-
-/*void ringbuf_init(ringbuf *sp)
-{
-	int max_chairs = thrlab_get_num_chairs();
-	void* dest = sp->buf;
-	struct customer **customer;
-	void* source = customer;
-
-	memcpy(dest, source, sizeof(customer));
-	sp->n = max_chairs;
-	sp->front = sp->rear = 0;
-	sem_init(&sp->mutex, 0, 1);
-        sem_init(&sp->mutex, 0, max_chairs);
-        sem_init(&sp->mutex, 0, 0);
-}
-
-void ringbuf_deinit(ringbuf *sp)
-{
-	free(sp->buf);
-}
-
-void ringbuf_insert(ringbuf *sp, void *item)
-{
-	sem_wait(&sp->slots);
-        sem_wait(&sp->mutex);
-
-	sp->buf[(++sp->rear)%(sp->n)] = (void *)item;
-        sem_post(&sp->mutex);
-        sem_post(&sp->slots);
-}
-*/
-
-/*customer ringbuf_remove(struct chairs *sp)
-{
-	customer item;
-        sem_wait(&sp->items);
-        sem_wait(&sp->mutex);
-
-	item = sp->buf[(++sp->front)%(sp->n)];
-
-        sem_post(&sp->mutex);
-        sem_post(&sp->slots);
-
-	return item;
-}
+/*
+	The barber waits for a customer which then lockes the ringbuffer, the customes is chosen from the buffer and the queueSize is lowered so we wont have phantom seats.
+	after we release  the buffer and waiting chair we cut the hair and then dismiss the customer.
 */
 static void *barber_work(void *arg)
 {
     struct barber *barber = arg;
     struct chairs *chairs = &barber->simulator->chairs;
-    struct customer *customer = chairs->customer[0]; /* TODO: Fetch a customer from a chair */
+    struct customer *customer = 0; //chairs->customer[0]; /* TODO: Fetch a customer from a chair */
 
     /* Main barber loop */
     while (true) {
-	sem_wait(&chairs->barber);
-        sem_wait(&chairs->mutex);
-
 	/* TODO: Here you must add you semaphores and locking logic */
+        int x = sem_wait(&chairs->itemsRing);
+        int y = sem_wait(&chairs->mutexRing);
+	posix_wrapper(x, y);
 
-        sem_wait(&chairs->itemsRing);
-        sem_wait(&chairs->mutexRing);
 
         customer = chairs->customer[(++chairs->front)%(chairs->max)];
-
-        sem_post(&chairs->mutexRing);
-        sem_post(&chairs->slotsRing);
-
-
-
-
-//        sem_wait(&chairs->barber);
-//        sem_wait(&chairs->mutex);
-
-//------------------------------------------------
-//	chairs->freeChairs++;
-	freeChairs++;
 	chairs->queueSize--;
-//	customer = chairs->customer[0]; /* TODO: You must choose the customer */
-	sem_post(&chairs->chair);
+
 	thrlab_prepare_customer(customer, barber->room);
-//	sem_post(&chairs->chair);
-	sem_post(&chairs->mutex);
-//	sem_post(&chairs->chair);
+
+        x = sem_post(&chairs->mutexRing);
+        y = sem_post(&chairs->slotsRing);
+	posix_wrapper(x, y);
 
         thrlab_sleep(5 * (customer->hair_length - customer->hair_goal));
-        thrlab_dismiss_customer(customer, barber->room);
 
-	sem_post(&customer->mutex);
+        thrlab_dismiss_customer(customer, barber->room);
+	x = sem_post(&customer->mutex);
+	posix_wrapper(x, x);
     }
     return NULL;
 }
@@ -158,6 +90,9 @@ static void *barber_work(void *arg)
 /**
  * Initialize data structures and create waiting barber threads.
  */
+/*
+	MutexRing is a binary lock but slots and items(chairs & customers) are both semaphore counters, my wrapper function is only simple and displays + exit if either pthread fails.
+*/
 static void setup(struct simulator *simulator)
 {
     struct chairs *chairs = &simulator->chairs;
@@ -167,20 +102,14 @@ static void setup(struct simulator *simulator)
     /* Create chairs*/
     chairs->customer = malloc(sizeof(struct customer *) * thrlab_get_num_chairs());
 
-    sem_init(&chairs->mutex, 0, 1);
-    sem_init(&chairs->chair, 0, 1);
-    sem_init(&chairs->barber, 0, 0);
-
-    sem_init(&chairs->mutexRing, 0, 1);
-    sem_init(&chairs->slotsRing, 0, thrlab_get_num_chairs());
-    sem_init(&chairs->itemsRing, 0, 0);
+    int x = sem_init(&chairs->mutexRing, 0, 1);
+    int y = sem_init(&chairs->slotsRing, 0, thrlab_get_num_chairs());
+    posix_wrapper(x, y);
+    x = sem_init(&chairs->itemsRing, 0, 0);
+    posix_wrapper(x, x);
 
     chairs->front = chairs->rear = 0;
-//    chairs->freeChairs = chairs->max;
-    freeChairs = thrlab_get_num_chairs();
     chairs->queueSize = 0;
-
-
     /* Create barber thread data */
     simulator->barberThread = malloc(sizeof(pthread_t) * thrlab_get_num_barbers());
     simulator->barber = malloc(sizeof(struct barber*) * thrlab_get_num_barbers());
@@ -192,10 +121,12 @@ static void setup(struct simulator *simulator)
 	barber->room = i;
 	barber->simulator = simulator;
 	simulator->barber[i] = barber;
-	pthread_create(&simulator->barberThread[i], 0, barber_work, barber);
-	pthread_detach(simulator->barberThread[i]);
 
-//	sem_post(&customer->mutex);
+
+	int x = (pthread_create(&simulator->barberThread[i], 0, barber_work, barber));
+	int y = (pthread_detach(simulator->barberThread[i]));
+
+	posix_wrapper(x, y);
     }
 }
 
@@ -215,50 +146,50 @@ static void cleanup(struct simulator *simulator)
 /**
  * Called in a new thread each time a customer has arrived.
  */
+
+/*
+	a customer arrives into the barbershop and is set as locked right away. if we have chair space then the buffer will be locked and customer will be set into the queue.
+	once he has been accepted he will remain locked until the barber releases him once again. otherwise the customer will be sent packin', hopefully he "wont be back".
+*/
 static void customer_arrived(struct customer *customer, void *arg)
 {
     struct simulator *simulator = arg;
     struct chairs *chairs = &simulator->chairs;
-
-    sem_init(&customer->mutex, 0, 0);
-
+    int x = sem_init(&customer->mutex, 0, 0);
+    int y = 0;
     /* TODO: Accept if there is an available chair */
 
-    //if found
-//    if(chairs->freeChairs > 0) {
-    if(freeChairs > 0) {
-	freeChairs--;
-	sem_wait(&chairs->chair);
+    if (chairs->queueSize < chairs->max){ 
+	y = sem_wait(&chairs->slotsRing);
+	posix_wrapper(x, y);
+        x = sem_wait(&chairs->mutexRing); // Lock ringbuffer
 
-	sem_wait(&chairs->slotsRing);
-        sem_wait(&chairs->mutexRing);
-
-        chairs->customer[(++chairs->rear)%(chairs->max)] = customer;
+	chairs->customer[(++chairs->rear)%(chairs->max)] = customer;
 	thrlab_accept_customer(customer);
-
-        sem_post(&chairs->mutexRing);
-        sem_post(&chairs->itemsRing);
-
 	chairs->queueSize++;
-//        chairs->freeChairs = (chairs->freeChairs - 1);
 
+        y = sem_post(&chairs->mutexRing); // Realease Ringbuffer
+	posix_wrapper(x, y);
+        x = sem_post(&chairs->itemsRing);
+	y = sem_wait(&customer->mutex);
+	posix_wrapper(x, y);
 
-
-//	sem_wait(&chairs->mutex);
-//	sem_wait(&chairs->chair);
-
-//	thrlab_accept_customer(customer);
-//	chairs->customer[0] = customer;
-
-//	sem_post(&chairs->mutex);
-
-
-	sem_post(&chairs->barber);
-	sem_wait(&customer->mutex);
     } else {
     /* TODO: Reject if there are no available chairs */
 	thrlab_reject_customer(customer);
+	y = sem_post(&customer->mutex);
+	posix_wrapper(x, y);
    }
+}
+/*
+	if either pthread create or detach returns an error value then we will quit the program right away.
+*/
+void posix_wrapper(int x, int y)
+{
+	if(x != 0 || y != 0) {
+		printf("Error occured");
+		exit(0);
+	}
 }
 
 int main (int argc, char **argv)
