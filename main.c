@@ -91,9 +91,10 @@ void ringbuf_insert(ringbuf *sp, void *item)
         sem_post(&sp->slots);
 }
 */
-int ringbuf_remove(ringbuf *sp)
+
+/*customer ringbuf_remove(struct chairs *sp)
 {
-	int item;
+	customer item;
         sem_wait(&sp->items);
         sem_wait(&sp->mutex);
 
@@ -104,7 +105,7 @@ int ringbuf_remove(ringbuf *sp)
 
 	return item;
 }
-
+*/
 static void *barber_work(void *arg)
 {
     struct barber *barber = arg;
@@ -117,7 +118,18 @@ static void *barber_work(void *arg)
         sem_wait(&chairs->mutex);
 
 	/* TODO: Here you must add you semaphores and locking logic */
-	customer = chairs->customer[0]; /* TODO: You must choose the customer */
+
+//        sem_wait(&chairs->itemsRing);
+//        sem_wait(&chairs->mutexRing);
+
+        customer = chairs->customer[(++chairs->front)%(chairs->max)];
+
+//        sem_post(&chairs->mutexRing);
+//        sem_post(&chairs->slotsRing);
+//------------------------------------------------
+
+
+//	customer = chairs->customer[0]; /* TODO: You must choose the customer */
 	thrlab_prepare_customer(customer, barber->room);
 
 	sem_post(&chairs->mutex);
